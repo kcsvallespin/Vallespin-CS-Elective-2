@@ -1,30 +1,56 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
-import 'package:my_flutter_project/main.dart';
+import 'package:my_flutter_project/screens/pokemon_list_screen.dart';
+import 'package:my_flutter_project/services/pokemon_service.dart';
+
+Widget _app(http.Client client) => MaterialApp(
+      home: PokemonListScreen(service: PokemonService(client: client)),
+    );
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows Pokemon names and IDs in a grid', (tester) async {
+    final client = MockClient((request) async {
+      expect(request.url.queryParameters['limit'], '30');
+      return http.Response(
+        jsonEncode({
+          'results': [
+            {'name': 'bulbasaur', 'url': 'https://pokeapi.co/api/v2/pokemon/1/'},
+            {'name': 'ivysaur', 'url': 'https://pokeapi.co/api/v2/pokemon/2/'},
+          ],
+        }),
+        200,
+      );
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(_app(client));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
     await tester.pump();
+    expect(find.byType(GridView), findsOneWidget);
+    expect(find.text('Bulbasaur'), findsOneWidget);
+    expect(find.text('#002'), findsOneWidget);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('shows error state with retry on failure', (tester) async {
+    final client = MockClient((_) async => http.Response('oops', 500));
+
+    await tester.pumpWidget(_app(client));
+    await tester.pump();
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('shows empty state when no results', (tester) async {
+    final client = MockClient(
+      (_) async => http.Response(jsonEncode({'results': []}), 200),
+    );
+
+    await tester.pumpWidget(_app(client));
+    await tester.pump();
+    expect(find.text('No Pokémon found.'), findsOneWidget);
   });
 }
