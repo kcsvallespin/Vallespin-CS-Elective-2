@@ -11,7 +11,9 @@ class PokemonService {
 
   PokemonService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Fetches the first [limit] Pokemon.
+  void dispose() => _client.close();
+
+  /// Fetches the first [limit] (30) Pokemon.
   ///
   /// Returns a Future instead of a Stream because this is a single
   /// request/response: we ask once and get one result (or one error).
@@ -30,8 +32,39 @@ class PokemonService {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final results = data['results'] as List<dynamic>;
 
-    return results
+    final pokemon = results
         .map((json) => Pokemon.fromJson(json as Map<String, dynamic>))
         .toList();
+
+    // The list endpoint does not include types, so enrich cards with the
+    // detail endpoint while retaining the list if an individual detail fails.
+    return Future.wait(
+      pokemon.map((item) async {
+        try {
+          final detailResponse = await _client
+              .get(Uri.parse('$_baseUrl/${item.id}'))
+              .timeout(const Duration(seconds: 15));
+          if (detailResponse.statusCode != 200) return item;
+          final detail =
+              jsonDecode(detailResponse.body) as Map<String, dynamic>;
+          final types = (detail['types'] as List<dynamic>)
+              .map(
+                (entry) =>
+                    ((entry as Map<String, dynamic>)['type']
+                            as Map<String, dynamic>)['name']
+                        as String,
+              )
+              .toList();
+          return Pokemon(
+            id: item.id,
+            name: item.name,
+            imageUrl: item.imageUrl,
+            types: types.isEmpty ? const ['unknown'] : types,
+          );
+        } catch (_) {
+          return item;
+        }
+      }),
+    );
   }
 }

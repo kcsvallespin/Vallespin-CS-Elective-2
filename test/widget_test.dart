@@ -9,8 +9,8 @@ import 'package:my_flutter_project/screens/pokemon_list_screen.dart';
 import 'package:my_flutter_project/services/pokemon_service.dart';
 
 Widget _app(http.Client client) => MaterialApp(
-      home: PokemonListScreen(service: PokemonService(client: client)),
-    );
+  home: PokemonListScreen(service: PokemonService(client: client)),
+);
 
 void main() {
   testWidgets('shows Pokemon names and IDs in a grid', (tester) async {
@@ -19,7 +19,10 @@ void main() {
       return http.Response(
         jsonEncode({
           'results': [
-            {'name': 'bulbasaur', 'url': 'https://pokeapi.co/api/v2/pokemon/1/'},
+            {
+              'name': 'bulbasaur',
+              'url': 'https://pokeapi.co/api/v2/pokemon/1/',
+            },
             {'name': 'ivysaur', 'url': 'https://pokeapi.co/api/v2/pokemon/2/'},
           ],
         }),
@@ -34,6 +37,44 @@ void main() {
     expect(find.byType(GridView), findsOneWidget);
     expect(find.text('Bulbasaur'), findsOneWidget);
     expect(find.text('#002'), findsOneWidget);
+  });
+
+  testWidgets('refreshes the Pokemon list from the home page', (tester) async {
+    var listRequests = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v2/pokemon') {
+        listRequests++;
+        return http.Response(
+          jsonEncode({
+            'results': [
+              {
+                'name': 'bulbasaur',
+                'url': 'https://pokeapi.co/api/v2/pokemon/1/',
+              },
+            ],
+          }),
+          200,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'types': [
+            {
+              'type': {'name': 'grass'},
+            },
+          ],
+        }),
+        200,
+      );
+    });
+
+    await tester.pumpWidget(_app(client));
+    await tester.pump();
+    expect(listRequests, 1);
+
+    await tester.tap(find.byTooltip('Refresh Pokémon'));
+    await tester.pump();
+    expect(listRequests, 2);
   });
 
   testWidgets('shows error state with retry on failure', (tester) async {

@@ -2,13 +2,16 @@ class Pokemon {
   final int id;
   final String name;
   final String imageUrl;
+  final List<String> types;
 
   const Pokemon({
     required this.id,
     required this.name,
     required this.imageUrl,
+    this.types = const ['unknown'],
   });
 
+  /// This is the Pokemon model page.
   /// Builds a Pokemon from one entry of the /pokemon list endpoint.
   /// Each entry looks like: { "name": "bulbasaur", "url": ".../pokemon/1/" }
   /// The list endpoint has no ID or image fields, so the ID is read from the
@@ -32,4 +35,6 @@ class Pokemon {
 
   /// 1 -> "#001"
   String get displayId => '#${id.toString().padLeft(3, '0')}';
+
+  String get primaryType => types.isEmpty ? 'unknown' : types.first;
 }
