@@ -1,8 +1,24 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'responsive_screen.dart';
 import 'adaptive_screen.dart';
+import 'screens/items_screen.dart';
 
-void main() {
+const supabaseUrl = 'https://sbdptpmrtoztuovpjheq.supabase.co';
+
+// Pass the anon key at run time so it isn't committed:
+//   flutter run --dart-define=SUPABASE_ANON_KEY=your-anon-key
+const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (supabaseAnonKey.isEmpty) {
+    throw StateError(
+      'SUPABASE_ANON_KEY is missing. Run with '
+      '--dart-define=SUPABASE_ANON_KEY=your-anon-key',
+    );
+  }
+  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
   runApp(const MyApp());
 }
 
@@ -55,6 +71,17 @@ class HomeScreen extends StatelessWidget {
                 );
               },
               child: const Text('Open Adaptive Screen'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ItemsScreen(),
+                  ),
+                );
+              },
+              child: const Text('Open Items'),
             ),
           ],
         ),
