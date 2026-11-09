@@ -1,86 +1,76 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/item.dart';
+import '../providers/items_provider.dart';
 import '../services/item_service.dart';
+import '../widgets/item_card.dart';
+import '../widgets/status_message.dart';
 
-class ItemsScreen extends StatefulWidget {
-  const ItemsScreen({super.key});
-
-  @override
-  State<ItemsScreen> createState() => _ItemsScreenState();
+/// Parses user input like "1,250.50" into a number rounded to 2 decimals.
+/// Returns null for empty or invalid input.
+double? _parsePrice(String input) {
+  final cleaned = input.replaceAll(',', '').trim();
+  if (cleaned.isEmpty) return null;
+  final value = double.tryParse(cleaned);
+  if (value == null) return null;
+  return (value * 100).round() / 100;
 }
 
-class _ItemsScreenState extends State<ItemsScreen> {
-  final _service = ItemService();
+class ItemsScreen extends ConsumerWidget {
+  const ItemsScreen({super.key});
 
-  List<Item> _items = [];
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final items = await _service.fetchItems();
-      if (!mounted) return;
-      setState(() => _items = items);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  void _showSnack(String message) {
+  void _showSnack(BuildContext context, String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _openForm([Item? item]) async {
+  Future<void> _openForm(
+    BuildContext context,
+    WidgetRef ref, [
+    Item? item,
+  ]) async {
     final result = await showDialog<_ItemFormResult>(
       context: context,
       builder: (_) => _ItemFormDialog(item: item),
     );
-    if (result == null) return;
+    if (result == null || !context.mounted) return;
 
+    final controller = ref.read(itemsControllerProvider.notifier);
     try {
       if (item == null) {
-        final created = await _service.createItem(
+        await controller.createItem(
           name: result.name,
           description: result.description,
           imageUrl: result.imageUrl,
+          price: result.price,
+          image: result.image,
         );
-        setState(() => _items.insert(0, created));
-        _showSnack('Item added');
       } else {
-        final updated = await _service.updateItem(
-          item.id,
+        await controller.updateItem(
+          item,
           name: result.name,
           description: result.description,
           imageUrl: result.imageUrl,
+          price: result.price,
+          image: result.image,
         );
-        setState(() {
-          final i = _items.indexWhere((x) => x.id == item.id);
-          if (i != -1) _items[i] = updated;
-        });
-        _showSnack('Item updated');
+      }
+      if (context.mounted) {
+        _showSnack(context, item == null ? 'Item added' : 'Item updated');
       }
     } catch (e) {
-      _showSnack('Save failed: $e');
+      if (context.mounted) _showSnack(context, 'Save failed: $e');
     }
   }
 
-  Future<void> _confirmDelete(Item item) async {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    WidgetRef ref,
+    Item item,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -98,95 +88,108 @@ class _ItemsScreenState extends State<ItemsScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !context.mounted) return;
 
     try {
-      await _service.deleteItem(item.id);
-      setState(() => _items.removeWhere((x) => x.id == item.id));
-      _showSnack('Item deleted');
+      await ref.read(itemsControllerProvider.notifier).deleteItem(item);
+      if (context.mounted) _showSnack(context, 'Item deleted');
     } catch (e) {
-      _showSnack('Delete failed: $e');
+      if (context.mounted) _showSnack(context, 'Delete failed: $e');
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(itemsControllerProvider);
+    final controller = ref.read(itemsControllerProvider.notifier);
+    final busy = state.loading || state.saving;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Items'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: _loading ? null : _load,
+            onPressed: busy ? null : controller.refresh,
           ),
         ],
+        bottom: busy && state.items.isNotEmpty
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(4),
+                child: LinearProgressIndicator(),
+              )
+            : null,
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _openForm(),
+        onPressed: state.saving ? null : () => _openForm(context, ref),
         tooltip: 'Add item',
         child: const Icon(Icons.add),
       ),
-      body: _buildBody(),
+      bottomNavigationBar: const _PaginationBar(),
+      body: Column(
+        children: [
+          const _PriceFilterBar(),
+          Expanded(
+            child: AbsorbPointer(
+              absorbing: state.saving,
+              child: _buildContent(context, ref, state),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildBody() {
-    if (_loading && _items.isEmpty) {
+  Widget _buildContent(BuildContext context, WidgetRef ref, ItemsState state) {
+    final controller = ref.read(itemsControllerProvider.notifier);
+
+    if (state.loading && state.items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null && _items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48),
-              const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
-        ),
+    if (state.error != null && state.items.isEmpty) {
+      return StatusMessage(
+        icon: Icons.wifi_off,
+        message: 'Something went wrong while loading items.\n${state.error}',
+        actionLabel: 'Retry',
+        onAction: controller.refresh,
       );
     }
-    if (_items.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          children: const [
-            SizedBox(height: 200),
-            Center(child: Text('No items yet. Tap + to add one.')),
-          ],
-        ),
-      );
+    if (state.items.isEmpty) {
+      return state.priceFilter != null
+          ? StatusMessage(
+              icon: Icons.filter_alt_off_outlined,
+              message: 'No items in this price range.',
+              actionLabel: 'Clear filter',
+              onAction: () => controller.setPriceFilter(null),
+            )
+          : StatusMessage(
+              icon: Icons.inventory_2_outlined,
+              message: 'No items yet. Tap + to add one.',
+              actionLabel: 'Reload',
+              onAction: controller.refresh,
+            );
     }
 
+    // Adaptive grid: as many ~180px-wide columns as fit the screen.
     return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        itemCount: _items.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
+      onRefresh: controller.refresh,
+      child: GridView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 180,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.75,
+        ),
+        itemCount: state.items.length,
         itemBuilder: (context, index) {
-          final item = _items[index];
-          return ListTile(
-            leading: _ItemImage(url: item.imageUrl),
-            title: Text(item.name),
-            subtitle: item.description == null
-                ? null
-                : Text(
-                    item.description!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-            onTap: () => _openForm(item),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete',
-              onPressed: () => _confirmDelete(item),
-            ),
+          final item = state.items[index];
+          return ItemCard(
+            item: item,
+            onTap: () => _openForm(context, ref, item),
+            onDelete: () => _confirmDelete(context, ref, item),
           );
         },
       ),
@@ -194,23 +197,145 @@ class _ItemsScreenState extends State<ItemsScreen> {
   }
 }
 
-class _ItemImage extends StatelessWidget {
-  const _ItemImage({this.url});
+/// Price range slider. Dragging only updates the labels; the Supabase query
+/// runs when the user lets go, so we don't send a request per pixel.
+class _PriceFilterBar extends ConsumerStatefulWidget {
+  const _PriceFilterBar();
 
-  final String? url;
+  @override
+  ConsumerState<_PriceFilterBar> createState() => _PriceFilterBarState();
+}
+
+class _PriceFilterBarState extends ConsumerState<_PriceFilterBar> {
+  RangeValues? _dragging;
+
+  String _money(double v) => '$currencySymbol${v.toStringAsFixed(0)}';
 
   @override
   Widget build(BuildContext context) {
-    const placeholder = CircleAvatar(child: Icon(Icons.inventory_2_outlined));
-    if (url == null) return placeholder;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        url!,
-        width: 48,
-        height: 48,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => placeholder,
+    final state = ref.watch(itemsControllerProvider);
+    final theme = Theme.of(context);
+    final max = state.maxPrice;
+    if (max <= 0) return const SizedBox.shrink();
+
+    final applied = state.priceFilter ?? RangeValues(0, max);
+    final values = _dragging ?? applied;
+    final filtering = state.priceFilter != null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.tune, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text('Price', style: theme.textTheme.titleSmall),
+              const SizedBox(width: 12),
+              Text(
+                '${_money(values.start)} – ${_money(values.end)}',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              if (filtering)
+                TextButton(
+                  onPressed: () => ref
+                      .read(itemsControllerProvider.notifier)
+                      .setPriceFilter(null),
+                  child: const Text('Clear'),
+                ),
+            ],
+          ),
+          RangeSlider(
+            min: 0,
+            max: max,
+            divisions: max.round().clamp(1, 1000),
+            values: RangeValues(
+              values.start.clamp(0, max),
+              values.end.clamp(0, max),
+            ),
+            labels: RangeLabels(_money(values.start), _money(values.end)),
+            onChanged: (v) => setState(() => _dragging = v),
+            onChangeEnd: (v) {
+              setState(() => _dragging = null);
+              ref.read(itemsControllerProvider.notifier).setPriceFilter(v);
+            },
+          ),
+          if (filtering)
+            Text(
+              'Items without a price are hidden while filtering.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Previous / next controls with "Page X of Y".
+class _PaginationBar extends ConsumerWidget {
+  const _PaginationBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(itemsControllerProvider);
+    final controller = ref.read(itemsControllerProvider.notifier);
+    final theme = Theme.of(context);
+    final busy = state.loading || state.saving;
+
+    if (state.totalCount == 0) return const SizedBox.shrink();
+
+    final first = state.page * ItemsState.pageSize + 1;
+    final last = first + state.items.length - 1;
+
+    return Material(
+      color: theme.colorScheme.surfaceContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                tooltip: 'Previous page',
+                onPressed: state.hasPrevious && !busy
+                    ? () => controller.goToPage(state.page - 1)
+                    : null,
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Page ${state.page + 1} of ${state.pageCount}',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    Text(
+                      'Showing $first–$last of ${state.totalCount}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                tooltip: 'Next page',
+                onPressed: state.hasNext && !busy
+                    ? () => controller.goToPage(state.page + 1)
+                    : null,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -219,9 +344,21 @@ class _ItemImage extends StatelessWidget {
 class _ItemFormResult {
   final String name;
   final String description;
+  final double? price;
+
+  /// Image URL to save when no new file was picked (may be empty to clear).
   final String imageUrl;
 
-  const _ItemFormResult(this.name, this.description, this.imageUrl);
+  /// Newly picked file to upload, if any. Takes priority over [imageUrl].
+  final PickedImage? image;
+
+  const _ItemFormResult(
+    this.name,
+    this.description,
+    this.price,
+    this.imageUrl,
+    this.image,
+  );
 }
 
 class _ItemFormDialog extends StatefulWidget {
@@ -235,30 +372,104 @@ class _ItemFormDialog extends StatefulWidget {
 
 class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _picker = ImagePicker();
   late final _name = TextEditingController(text: widget.item?.name);
-  late final _description =
-      TextEditingController(text: widget.item?.description);
+  late final _description = TextEditingController(
+    text: widget.item?.description,
+  );
   late final _imageUrl = TextEditingController(text: widget.item?.imageUrl);
+  late final _price = TextEditingController(
+    text: widget.item?.price?.toStringAsFixed(2),
+  );
+
+  PickedImage? _picked;
 
   @override
   void dispose() {
     _name.dispose();
     _description.dispose();
     _imageUrl.dispose();
+    _price.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final file = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200,
+        imageQuality: 85,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final name = file.name;
+      final dot = name.lastIndexOf('.');
+      final ext = dot == -1 ? 'jpg' : name.substring(dot + 1);
+      setState(() {
+        _picked = PickedImage(bytes, ext);
+        _imageUrl.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not pick image: $e')));
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _picked = null;
+      _imageUrl.clear();
+    });
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     Navigator.pop(
       context,
-      _ItemFormResult(_name.text, _description.text, _imageUrl.text),
+      _ItemFormResult(
+        _name.text,
+        _description.text,
+        _parsePrice(_price.text),
+        _imageUrl.text,
+        _picked,
+      ),
+    );
+  }
+
+  Widget _preview() {
+    final url = _imageUrl.text.trim();
+    Widget child;
+    if (_picked != null) {
+      child = Image.memory(_picked!.bytes, fit: BoxFit.cover);
+    } else if (url.isNotEmpty) {
+      child = Image.network(
+        url,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) =>
+            const Center(child: Icon(Icons.broken_image_outlined, size: 40)),
+      );
+    } else {
+      child = const Center(
+        child: Icon(Icons.image_outlined, size: 40, color: Colors.grey),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 160,
+        width: double.infinity,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: child,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.item != null;
+    final hasImage = _picked != null || _imageUrl.text.trim().isNotEmpty;
     return AlertDialog(
       title: Text(isEdit ? 'Edit item' : 'Add item'),
       content: Form(
@@ -267,10 +478,38 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _preview(),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: Text(hasImage ? 'Change image' : 'Pick image'),
+                    ),
+                  ),
+                  if (hasImage) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _removeImage,
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Remove image',
+                    ),
+                  ],
+                ],
+              ),
+              TextFormField(
+                controller: _imageUrl,
+                decoration: const InputDecoration(
+                  labelText: 'or paste an image URL',
+                ),
+                keyboardType: TextInputType.url,
+                onChanged: (_) => setState(() => _picked = null),
+              ),
               TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Name'),
-                autofocus: true,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Name is required' : null,
               ),
@@ -281,9 +520,21 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 minLines: 1,
               ),
               TextFormField(
-                controller: _imageUrl,
-                decoration: const InputDecoration(labelText: 'Image URL'),
-                keyboardType: TextInputType.url,
+                controller: _price,
+                decoration: const InputDecoration(
+                  labelText: 'Price',
+                  prefixText: '$currencySymbol ',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  final price = _parsePrice(v);
+                  if (price == null) return 'Enter a valid number';
+                  if (price < 0) return 'Price cannot be negative';
+                  return null;
+                },
               ),
             ],
           ),
@@ -294,10 +545,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: Text(isEdit ? 'Save' : 'Add'),
-        ),
+        FilledButton(onPressed: _submit, child: Text(isEdit ? 'Save' : 'Add')),
       ],
     );
   }
