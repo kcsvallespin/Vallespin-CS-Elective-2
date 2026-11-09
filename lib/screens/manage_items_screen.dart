@@ -5,21 +5,12 @@ import 'package:image_picker/image_picker.dart';
 import '../models/item.dart';
 import '../providers/items_provider.dart';
 import '../services/item_service.dart';
-import '../widgets/item_card.dart';
-import '../widgets/status_message.dart';
+import '../widgets/shop_controls.dart';
 
-/// Parses user input like "1,250.50" into a number rounded to 2 decimals.
-/// Returns null for empty or invalid input.
-double? _parsePrice(String input) {
-  final cleaned = input.replaceAll(',', '').trim();
-  if (cleaned.isEmpty) return null;
-  final value = double.tryParse(cleaned);
-  if (value == null) return null;
-  return (value * 100).round() / 100;
-}
-
-class ItemsScreen extends ConsumerWidget {
-  const ItemsScreen({super.key});
+/// Admin screen for creating, editing, and deleting items. Shares the same
+/// Riverpod state (page + filter) as the shop, so changes show up there too.
+class ManageItemsScreen extends ConsumerWidget {
+  const ManageItemsScreen({super.key});
 
   void _showSnack(BuildContext context, String message) {
     ScaffoldMessenger.of(context)
@@ -101,244 +92,98 @@ class ItemsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(itemsControllerProvider);
-    final controller = ref.read(itemsControllerProvider.notifier);
-    final busy = state.loading || state.saving;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Items'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: busy ? null : controller.refresh,
-          ),
-        ],
-        bottom: busy && state.items.isNotEmpty
-            ? const PreferredSize(
-                preferredSize: Size.fromHeight(4),
-                child: LinearProgressIndicator(),
-              )
-            : null,
+        title: const Text('MANAGE ITEMS'),
+        bottom: busyIndicator(state),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: state.saving ? null : () => _openForm(context, ref),
-        tooltip: 'Add item',
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text('ADD ITEM'),
       ),
-      bottomNavigationBar: const _PaginationBar(),
+      bottomNavigationBar: const PaginationBar(),
       body: Column(
         children: [
-          const _PriceFilterBar(),
+          const PriceFilterBar(),
           Expanded(
             child: AbsorbPointer(
               absorbing: state.saving,
-              child: _buildContent(context, ref, state),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContent(BuildContext context, WidgetRef ref, ItemsState state) {
-    final controller = ref.read(itemsControllerProvider.notifier);
-
-    if (state.loading && state.items.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (state.error != null && state.items.isEmpty) {
-      return StatusMessage(
-        icon: Icons.wifi_off,
-        message: 'Something went wrong while loading items.\n${state.error}',
-        actionLabel: 'Retry',
-        onAction: controller.refresh,
-      );
-    }
-    if (state.items.isEmpty) {
-      return state.priceFilter != null
-          ? StatusMessage(
-              icon: Icons.filter_alt_off_outlined,
-              message: 'No items in this price range.',
-              actionLabel: 'Clear filter',
-              onAction: () => controller.setPriceFilter(null),
-            )
-          : StatusMessage(
-              icon: Icons.inventory_2_outlined,
-              message: 'No items yet. Tap + to add one.',
-              actionLabel: 'Reload',
-              onAction: controller.refresh,
-            );
-    }
-
-    // Adaptive grid: as many ~180px-wide columns as fit the screen.
-    return RefreshIndicator(
-      onRefresh: controller.refresh,
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 180,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.75,
-        ),
-        itemCount: state.items.length,
-        itemBuilder: (context, index) {
-          final item = state.items[index];
-          return ItemCard(
-            item: item,
-            onTap: () => _openForm(context, ref, item),
-            onDelete: () => _confirmDelete(context, ref, item),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// Price range slider. Dragging only updates the labels; the Supabase query
-/// runs when the user lets go, so we don't send a request per pixel.
-class _PriceFilterBar extends ConsumerStatefulWidget {
-  const _PriceFilterBar();
-
-  @override
-  ConsumerState<_PriceFilterBar> createState() => _PriceFilterBarState();
-}
-
-class _PriceFilterBarState extends ConsumerState<_PriceFilterBar> {
-  RangeValues? _dragging;
-
-  String _money(double v) => '$currencySymbol${v.toStringAsFixed(0)}';
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ref.watch(itemsControllerProvider);
-    final theme = Theme.of(context);
-    final max = state.maxPrice;
-    if (max <= 0) return const SizedBox.shrink();
-
-    final applied = state.priceFilter ?? RangeValues(0, max);
-    final values = _dragging ?? applied;
-    final filtering = state.priceFilter != null;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.tune, size: 18, color: theme.colorScheme.primary),
-              const SizedBox(width: 8),
-              Text('Price', style: theme.textTheme.titleSmall),
-              const SizedBox(width: 12),
-              Text(
-                '${_money(values.start)} – ${_money(values.end)}',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              if (filtering)
-                TextButton(
-                  onPressed: () => ref
-                      .read(itemsControllerProvider.notifier)
-                      .setPriceFilter(null),
-                  child: const Text('Clear'),
-                ),
-            ],
-          ),
-          RangeSlider(
-            min: 0,
-            max: max,
-            divisions: max.round().clamp(1, 1000),
-            values: RangeValues(
-              values.start.clamp(0, max),
-              values.end.clamp(0, max),
-            ),
-            labels: RangeLabels(_money(values.start), _money(values.end)),
-            onChanged: (v) => setState(() => _dragging = v),
-            onChangeEnd: (v) {
-              setState(() => _dragging = null);
-              ref.read(itemsControllerProvider.notifier).setPriceFilter(v);
-            },
-          ),
-          if (filtering)
-            Text(
-              'Items without a price are hidden while filtering.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Previous / next controls with "Page X of Y".
-class _PaginationBar extends ConsumerWidget {
-  const _PaginationBar();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(itemsControllerProvider);
-    final controller = ref.read(itemsControllerProvider.notifier);
-    final theme = Theme.of(context);
-    final busy = state.loading || state.saving;
-
-    if (state.totalCount == 0) return const SizedBox.shrink();
-
-    final first = state.page * ItemsState.pageSize + 1;
-    final last = first + state.items.length - 1;
-
-    return Material(
-      color: theme.colorScheme.surfaceContainer,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                tooltip: 'Previous page',
-                onPressed: state.hasPrevious && !busy
-                    ? () => controller.goToPage(state.page - 1)
-                    : null,
-              ),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Page ${state.page + 1} of ${state.pageCount}',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    Text(
-                      'Showing $first–$last of ${state.totalCount}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+              child: ItemsStateView(
+                builder: (context, items) => ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 96),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    return Card(
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: ItemImage(
+                            url: item.imageUrl,
+                            width: 56,
+                            height: 56,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        title: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          item.displayPrice ?? 'No price',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        onTap: () => _openForm(context, ref, item),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined),
+                              tooltip: 'Edit',
+                              onPressed: () => _openForm(context, ref, item),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              tooltip: 'Delete',
+                              onPressed: () =>
+                                  _confirmDelete(context, ref, item),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                tooltip: 'Next page',
-                onPressed: state.hasNext && !busy
-                    ? () => controller.goToPage(state.page + 1)
-                    : null,
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
+}
+
+/// Parses user input like "1,250.50" into a number rounded to 2 decimals.
+/// Returns null for empty or invalid input.
+double? _parsePrice(String input) {
+  final cleaned = input.replaceAll(',', '').trim();
+  if (cleaned.isEmpty) return null;
+  final value = double.tryParse(cleaned);
+  if (value == null) return null;
+  return (value * 100).round() / 100;
 }
 
 class _ItemFormResult {

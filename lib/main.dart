@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'screens/items_screen.dart';
+import 'providers/theme_provider.dart';
+import 'screens/shop_screen.dart';
 
 const supabaseUrl = 'https://sbdptpmrtoztuovpjheq.supabase.co';
 
@@ -23,18 +24,39 @@ Future<void> main() async {
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = ref.watch(darkModeProvider);
+    final colors = ColorScheme.fromSeed(
+      seedColor: const Color.fromARGB(255, 250, 33, 199),
+      brightness: isDark ? Brightness.dark : Brightness.light,
+    );
     return MaterialApp(
-      title: 'Items',
+      title: "Reniacc's Comission Services",
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: colors,
+        useMaterial3: true,
+        cardTheme: const CardThemeData(margin: EdgeInsets.zero),
+        appBarTheme: AppBarTheme(
+          backgroundColor: colors.surface,
+          foregroundColor: colors.onSurface,
+          surfaceTintColor: Colors.transparent,
+          scrolledUnderElevation: 0,
+        ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: colors.primaryContainer,
+          contentTextStyle: TextStyle(color: colors.onPrimaryContainer),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
-      home: const ItemsScreen(),
+      home: const ShopScreen(),
     );
   }
 }
