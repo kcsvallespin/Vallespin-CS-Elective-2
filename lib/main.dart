@@ -14,14 +14,42 @@ const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (supabaseAnonKey.isEmpty) {
-    throw StateError(
-      'SUPABASE_ANON_KEY is missing. Run with '
+    // Show the problem on screen instead of a blank white page.
+    runApp(const _StartupError(
+      'SUPABASE_ANON_KEY is missing.\n\nRun with:\n'
+      'flutter run -d chrome --web-port 3000 '
       '--dart-define=SUPABASE_ANON_KEY=your-publishable-key',
-    );
+    ));
+    return;
   }
-  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
+  try {
+    await Supabase.initialize(
+        url: supabaseUrl, publishableKey: supabaseAnonKey);
+  } catch (e) {
+    runApp(_StartupError('Could not connect to Supabase:\n$e'));
+    return;
+  }
   // ProviderScope enables Riverpod state management.
   runApp(const ProviderScope(child: MyApp()));
+}
+
+class _StartupError extends StatelessWidget {
+  const _StartupError(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: SelectableText(message, textAlign: TextAlign.center),
+            ),
+          ),
+        ),
+      );
 }
 
 class MyApp extends ConsumerWidget {
