@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'providers/theme_provider.dart';
-import 'screens/shop_screen.dart';
+import 'screens/auth_gate.dart';
 
 const supabaseUrl = 'https://sbdptpmrtoztuovpjheq.supabase.co';
 
@@ -56,7 +56,7 @@ class MyApp extends ConsumerWidget {
           ),
         ),
       ),
-      home: const ShopScreen(),
+      home: const AuthGate(),
     );
   }
 }
