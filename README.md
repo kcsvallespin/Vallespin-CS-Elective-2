@@ -1,40 +1,66 @@
-# my_flutter_project
+# Reniacc's Commission Services: E-Commerce App
 
-A new Flutter project.
+Flutter + Riverpod + Supabase shop with two roles. **Admins** manage the
+catalog and orders, and **customers** browse, fill a cart and place orders.
 
-## Getting Started
+## Features
 
-This project is a starting point for a Flutter application.
+| Role | What they can do |
+|---|---|
+| Signed out | Sign up / log in with email + password or Google |
+| Customer | Search, filter by category and price, paginate, add to cart (limited by stock), checkout, view own order history |
+| Admin | Add / edit / delete products (with image upload), manage categories, view all orders and change their status |
 
-A few resources to get you started if this is your first Flutter project:
+Every new account is a **customer**. To make an admin, run in the SQL Editor:
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```sql
+update public.profiles
+set role_id = (select id from public.roles where role = 'admin')
+where email = 'admin@example.com';
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Project structure
 
-## Authentication (backend-auth)
+```
+lib/
+  models/      plain data classes (Product, ShopOrder, Profile, ...)
+  services/    the ONLY code that talks to Supabase
+  providers/   Riverpod state; screens call these, these call services
+  screens/
+    auth/      auth gate, login, sign up
+    customer/  shop, product details, cart, checkout confirmation, order history
+    admin/     products (FAB + edit/delete), product form, categories, orders
+  widgets/     shared UI (product card, filters, order card, status messages)
+  theme/       app-wide theme (light + dark)
+  utils/       formatting and error messages
+supabase/      SQL for the schema, functions, trigger and RLS policies
+```
 
-The app requires sign-in before showing the shop. Two Supabase Auth
-providers are supported:
+## Supabase setup
 
-1. **Email / password**: Supabase's built-in provider.
-2. **GitHub (OAuth)**: the additional third-party provider.
+1. Run `supabase/01_schema.sql` in the SQL Editor (tables).
+2. Run `supabase/02_functions_triggers_rls.sql` (profile trigger,
+   `place_order` checkout function, RLS and storage policies).
+3. Promote your admin account with the query above.
 
-### Supabase setup for GitHub
+Security is enforced by Postgres, not by hiding buttons: RLS limits every
+table to the permissions in the project brief, customers cannot change
+their role, and orders can only be created through `place_order`. That
+function reads prices, names and stock from the database, saves the order
+and its items, and reduces stock in one transaction.
 
-1. On GitHub, go to Settings > Developer settings > OAuth Apps > New OAuth App.
-   - Homepage URL: your app URL (e.g. `http://localhost:3000`)
-   - Authorization callback URL: `https://sbdptpmrtoztuovpjheq.supabase.co/auth/v1/callback`
-2. Copy the Client ID and generate a Client Secret.
-3. In Supabase: Authentication > Sign In / Providers > GitHub, enable it and
+### Google sign-in setup
+
+1. In Google Cloud Console, create a project and configure the OAuth consent
+   screen (External; add your Gmail under Test users).
+2. Create an OAuth client ID of type **Web application**:
+   - Authorized JavaScript origins: `http://localhost:3000`
+   - Authorized redirect URIs: `https://sbdptpmrtoztuovpjheq.supabase.co/auth/v1/callback`
+3. In Supabase: Authentication > Sign In / Providers > Google, enable it and
    paste the Client ID and Secret.
-4. In Supabase: Authentication > URL Configuration > Redirect URLs, add
-   - `io.supabase.reniacc://login-callback/` (Android / iOS)
-   - `http://localhost:3000/**` (web, when run with `--web-port 3000`)
+4. In Supabase: Authentication > URL Configuration
+   - Site URL: `http://localhost:3000`
+   - Redirect URLs: `io.supabase.reniacc://login-callback/` and `http://localhost:3000/**`
 
 ### Run
 

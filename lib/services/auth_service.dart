@@ -8,7 +8,7 @@ const oauthRedirectUrl = 'io.supabase.reniacc://login-callback/';
 
 /// Thin wrapper around Supabase Auth.
 ///
-/// Supports email/password (Supabase's built-in provider) plus GitHub as the
+/// Supports email/password (Supabase's built-in provider) plus Google as the
 /// additional third-party OAuth provider.
 class AuthService {
   AuthService([SupabaseClient? client])
@@ -25,17 +25,31 @@ class AuthService {
   Future<void> signInWithEmail(String email, String password) =>
       _auth.signInWithPassword(email: email, password: password);
 
+  /// Creates an account. The names are stored in the user's metadata, where
+  /// the `handle_new_user` database trigger copies them into `profiles`.
+  /// The role is never sent from the app: the trigger always assigns
+  /// "customer".
+  ///
   /// Returns true if the user is signed in right away, false if Supabase
   /// requires them to confirm their email first.
-  Future<bool> signUpWithEmail(String email, String password) async {
-    final res = await _auth.signUp(email: email, password: password);
+  Future<bool> signUpWithEmail({
+    required String email,
+    required String password,
+    required String firstname,
+    required String lastname,
+  }) async {
+    final res = await _auth.signUp(
+      email: email,
+      password: password,
+      data: {'firstname': firstname, 'lastname': lastname},
+    );
     return res.session != null;
   }
 
-  /// Opens GitHub's consent page. On web the page redirects back to the app's
+  /// Opens Google's account picker. On web the page redirects back to the app's
   /// own URL; on mobile it returns through [oauthRedirectUrl].
-  Future<void> signInWithGitHub() => _auth.signInWithOAuth(
-        OAuthProvider.github,
+  Future<void> signInWithGoogle() => _auth.signInWithOAuth(
+        OAuthProvider.google,
         redirectTo: kIsWeb ? null : oauthRedirectUrl,
         authScreenLaunchMode: kIsWeb
             ? LaunchMode.platformDefault
